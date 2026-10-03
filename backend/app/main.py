@@ -153,7 +153,10 @@ def get_tasks(status: Optional[str] = None):
 
 @app.post("/api/tasks/{task_id}")
 def update_task(task_id: str, upd: TaskUpdateIn):
-    t = service.update_task(task_id, upd)
+    try:
+        t = service.update_task(task_id, upd)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
     if t is None:
         raise HTTPException(404, f"task {task_id} 不存在")
     return t

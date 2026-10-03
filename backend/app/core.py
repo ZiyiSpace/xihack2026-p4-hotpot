@@ -159,6 +159,25 @@ class HotpotService:
             return {"error": f"盘 {ev.plate_id} 无开放绑定；请先 POST /api/bindings 上盘绑定",
                     "event_id": event_id}
 
+        # 乱序隔离：迟到旧事件留痕但不参与解释与任务触发
+        # （完成标准：任务完成后不会因旧事件再次触发；验收场景：乱序不直接计为取用）
+        if st.last_obs_at is not None and ts < st.last_obs_at:
+            db.insert_event({
+                "event_id": event_id, "serving_id": st.serving_id, "plate_id": ev.plate_id,
+                "station_id": ev.station_id, "observed_at": ts.isoformat(),
+                "lap_index": ev.lap_index, "net_weight_g": net,
+                "gross_weight_g": ev.gross_weight_g, "tare_g": ev.tare_g,
+                "item_count": ev.item_count, "dish_id_claim": ev.dish_id,
+                "image_ref": ev.image_ref, "visual_level": ev.visual_level,
+                "quality": ev.quality, "source": ev.source, "simulated": ev.simulated,
+                "interpretation": {"classification": "out_of_order",
+                                   "note": f"事件时间早于已处理观测 {st.last_obs_at.isoformat()}；"
+                                           "留痕待复核，不更新状态、不触发任务"},
+                "created_at": db.now_iso(),
+            })
+            return {"event_id": event_id, "classification": "out_of_order",
+                    "note": "迟到旧事件已隔离：留痕待复核，不更新状态、不触发任务"}
+
         # 去重/合并：同盘同站时间窗内且重量无真实变化 => 同一次经过，留痕但状态不变
         if (net is not None and same_pass(st.last_obs_at, st.last_station, ts, ev.station_id)
                 and st.trusted_net_g is not None
@@ -332,7 +351,16 @@ class HotpotService:
         if t is None:
             return None
         now = db.now_iso()
+        # 数量/单位检查（任务单要求）：克数、件数只接受非负数，不能同时改写成互相矛盾的口径
+        if upd.quantity_g is not None and upd.quantity_g < 0:
+            raise ValueError("quantity_g 不能为负")
+        if upd.quantity_count is not None and upd.quantity_count < 0:
+            raise ValueError("quantity_count 不能为负")
+        if upd.postpone_min is not None and upd.postpone_min < 0:
+            raise ValueError("postpone_min 不能为负")
         if upd.status:
+            if upd.status not in ("making", "done", "cancelled", "postponed", "pending"):
+                raise ValueError(f"非法状态 {upd.status}")
             t["status"] = upd.status
             if upd.status in ("done", "cancelled"):
                 t["closed_at"] = now
@@ -344,6 +372,7 @@ class HotpotService:
             t["quantity_g"] = upd.quantity_g
         if upd.quantity_count is not None:
             t["quantity_count"] = upd.quantity_count
+            # 件数与克数分开保存；单位在任务生成时按菜品是否易计数决定，修改数量不改口径
         if upd.note:
             t["close_note"] = ((t.get("close_note") or "") + f" | {upd.note}").strip(" |")
         t["updated_at"] = now
