@@ -223,14 +223,16 @@ class HotpotService:
 
         self._persist_serving(st)
 
-        new_tasks = refill.commit_tasks(refill.evaluate_serving(st, ts)) if classification not in (
-            "unexplained_increase",) else []
+        if classification != "unexplained_increase":
+            created, updated = refill.commit_tasks(refill.evaluate_serving(st, ts))
+        else:
+            created, updated = [], []
 
         return {
             "event_id": event_id,
             "interpretation": interpretation,
             "snapshot": self.serving_snapshot(st),
-            "new_tasks": new_tasks,
+            "new_tasks": {"created": created, "updated": updated},
         }
 
     def _suspend_dish(self, dish_id: str, why: str) -> None:
@@ -321,6 +323,7 @@ class HotpotService:
         dishes = {d["dish_id"]: d for d in db.get_dishes()}
         for t in db.get_tasks(status=status):
             t["dish_name"] = dishes.get(t["dish_id"], {}).get("name")
+            t["simulated"] = bool(t.get("simulated"))
             out.append(t)
         return out
 
