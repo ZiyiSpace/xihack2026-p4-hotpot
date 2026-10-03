@@ -1,0 +1,14 @@
+# 本地环境与运行时
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# 密钥（Jev API key）—— 绝不提交
+backend/.env
+
+# 运行时数据（SQLite / 上传图片 / 回放报告）
+backend/data/
+
+# 个人本地笔记（从聊天记录提取的背景材料，不入库）
+notes/
